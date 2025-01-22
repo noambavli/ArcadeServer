@@ -5,12 +5,15 @@ from cryptography.hazmat.primitives import serialization, hashes
 import base64
 
 app = Flask(__name__)
-#
-# MongoDB setup
-client = MongoClient('mongodb://localhost:27017/')
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
+uri = "mongodb+srv://noambavli07:dbpasswordiloveisrael123456@cluster0.3hmty.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+# Create a new client and connect to the server
+client = MongoClient(uri, server_api=ServerApi('1'))
+
 db = client.arcade_app
-users_collection = db.users
-scores_collection = db.scores
+users_collection = db.users_authentication
+information_collection = db.users_information
 
 # Generate RSA keys
 private_key = rsa.generate_private_key(
@@ -68,7 +71,7 @@ def register():
         return jsonify({"status": "error", "message": "Username already exists"}), 400
 
     users_collection.insert_one({"username": username, "password": password})
-    scores_collection.insert_one({"username": username, "score": 0})  # Initialize score
+    information_collection.insert_one({"username": username, "score": 0})  # Initialize score
     return jsonify({"status": "success", "message": "User registered successfully"}), 201
 
 @app.route('/login', methods=['POST'])
@@ -89,7 +92,7 @@ def login():
     if not user:
         return jsonify({"status": "error", "message": "Invalid username or password"}), 401
 
-    score_entry = scores_collection.find_one({"username": username})
+    score_entry = information_collection.find_one({"username": username})
     score = score_entry["score"] if score_entry else 0
 
     return jsonify({"status": "success", "username": username, "score": score}), 200
@@ -110,7 +113,7 @@ def update_score():
     if not username or score is None:
         return jsonify({"status": "error", "message": "Invalid input"}), 400
 
-    scores_collection.update_one({"username": username}, {"$set": {"score": score}}, upsert=True)
+    information_collection.update_one({"username": username}, {"$set": {"score": score}}, upsert=True)
     return jsonify({"status": "success", "message": "Score updated successfully"}), 200
 
 @app.route('/get_score', methods=['POST'])
@@ -128,7 +131,7 @@ def get_score():
     if not username:
         return jsonify({"status": "error", "message": "Invalid input"}), 400
 
-    score_entry = scores_collection.find_one({"username": username})
+    score_entry = information_collection.find_one({"username": username})
     if not score_entry:
         return jsonify({"status": "error", "message": "User not found"}), 404
 
@@ -136,7 +139,7 @@ def get_score():
 
 @app.route('/get_scoreboard', methods=['GET'])
 def get_scoreboard():
-    scores = list(scores_collection.find().sort("score", -1))
+    scores = list(information_collection.find().sort("score", -1))
     scoreboard = [{"username": entry["username"], "score": entry["score"]} for entry in scores]
     return jsonify({"status": "success", "scoreboard": scoreboard}), 200
 
