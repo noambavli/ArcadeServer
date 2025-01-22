@@ -1,3 +1,5 @@
+import os
+
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -148,4 +150,5 @@ def get_public_key():
     return jsonify({"public_key": public_key_pem.decode('utf-8')}), 200
 
 if __name__ == '__main__':
-    app.run(debug=True)
+        port = int(os.getenv("PORT", 5000))  # Default to port 5000 if PORT isn't set
+        app.run(host="0.0.0.0", port=port, debug=True)
