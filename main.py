@@ -19,15 +19,6 @@ from pymongo.server_api import ServerApi
 MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/arcade_app')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'secret_key_for_development')
 
-# Store items configuration
-STORE_ITEMS = [
-    {"id": "star", "emoji": "⭐", "price": 100, "description": "Star decoration"},
-    {"id": "crown", "emoji": "👑", "price": 500, "description": "Crown decoration"},
-    {"id": "fire", "emoji": "🔥", "price": 200, "description": "Fire decoration"},
-    {"id": "sparkles", "emoji": "✨", "price": 150, "description": "Sparkles decoration"},
-    {"id": "rocket", "emoji": "🚀", "price": 300, "description": "Rocket decoration"}
-]
-
 # Custom error classes
 class APIError(Exception):
     def __init__(self, message: str, status_code: int = 500, payload: Optional[Dict[str, Any]] = None):
@@ -87,7 +78,6 @@ try:
     db = client.arcade_app
     users_collection = db.users_authentication
     information_collection = db.users_information
-    decorations_collection = db.user_decorations  # New collection for user decorations
 except Exception as e:
     print(f"MongoDB connection error: {e}")
     db_available = False
@@ -240,24 +230,10 @@ def get_profile(current_user):
         if not score_entry:
             return jsonify({"status": "error", "message": "User profile not found"}), 404
         
-        # Get decorations
-        decorations_entry = decorations_collection.find_one({"username": username})
-        
-        # Get active decorations
-        active_decorations = decorations_entry["active_decorations"] if decorations_entry else []
-        decorated_username = username
-        for decoration_id in active_decorations:
-            item = next((item for item in STORE_ITEMS if item["id"] == decoration_id), None)
-            if item:
-                decorated_username = f"{item['emoji']}{decorated_username}{item['emoji']}"
-        
         response = jsonify({
             "status": "success", 
             "username": username,
-            "decorated_username": decorated_username,
-            "score": score_entry["score"],
-            "owned_decorations": decorations_entry["owned_items"] if decorations_entry else [],
-            "active_decorations": active_decorations
+            "score": score_entry["score"]
         })
         
         # Add cache control headers to prevent caching
@@ -296,141 +272,14 @@ def get_scoreboard(current_user):
         
         for entry in scores:
             username = entry["username"]
-            decorations_entry = decorations_collection.find_one({"username": username})
-            decorated_username = username
-            
-            if decorations_entry and "active_decorations" in decorations_entry:
-                for decoration_id in decorations_entry["active_decorations"]:
-                    item = next((item for item in STORE_ITEMS if item["id"] == decoration_id), None)
-                    if item:
-                        decorated_username = f"{item['emoji']}{decorated_username}{item['emoji']}"
-            
             scoreboard.append({
                 "username": username,
-                "decorated_username": decorated_username,
                 "score": entry["score"]
             })
         
         return jsonify({"status": "success", "scoreboard": scoreboard}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": f"Scoreboard retrieval failed: {str(e)}"}), 500
-
-@app.route('/store', methods=['GET'])
-@token_required
-def get_store(current_user):
-    try:
-        # Get user's owned items
-        user_decorations = decorations_collection.find_one({"username": current_user["username"]})
-        owned_items = user_decorations["owned_items"] if user_decorations else []
-        
-        # Add owned status to store items
-        store_items = []
-        for item in STORE_ITEMS:
-            store_items.append({
-                **item,
-                "owned": item["id"] in owned_items
-            })
-        
-        return jsonify({
-            "status": "success",
-            "store_items": store_items
-        }), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"Failed to retrieve store items: {str(e)}"}), 500
-
-@app.route('/store/purchase', methods=['POST'])
-@token_required
-def purchase_item(current_user):
-    data = request.get_json()
-    
-    if not data or "item_id" not in data:
-        return jsonify({"status": "error", "message": "Item ID is required"}), 400
-    
-    item_id = data["item_id"]
-    username = current_user["username"]
-    
-    # Find the item in store
-    item = next((item for item in STORE_ITEMS if item["id"] == item_id), None)
-    if not item:
-        return jsonify({"status": "error", "message": "Invalid item ID"}), 400
-    
-    try:
-        # Get user's score
-        user_info = information_collection.find_one({"username": username})
-        if not user_info:
-            return jsonify({"status": "error", "message": "User not found"}), 404
-        
-        current_score = user_info["score"]
-        
-        # Check if user can afford the item
-        if current_score < item["price"]:
-            return jsonify({"status": "error", "message": "Not enough points to purchase this item"}), 400
-        
-        # Get user's decorations
-        user_decorations = decorations_collection.find_one({"username": username})
-        if not user_decorations:
-            # Create new decorations document if it doesn't exist
-            decorations_collection.insert_one({
-                "username": username,
-                "owned_items": [item_id],
-                "active_decorations": []
-            })
-        else:
-            # Add item to owned items if not already owned
-            if item_id not in user_decorations["owned_items"]:
-                decorations_collection.update_one(
-                    {"username": username},
-                    {"$push": {"owned_items": item_id}}
-                )
-        
-        # Deduct points
-        information_collection.update_one(
-            {"username": username},
-            {"$inc": {"score": -item["price"]}}
-        )
-        
-        return jsonify({
-            "status": "success",
-            "message": f"Successfully purchased {item['emoji']} decoration!",
-            "remaining_points": current_score - item["price"]
-        }), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"Purchase failed: {str(e)}"}), 500
-
-@app.route('/decorations/set', methods=['POST'])
-@token_required
-def set_decorations(current_user):
-    data = request.get_json()
-    
-    if not data or "decorations" not in data:
-        return jsonify({"status": "error", "message": "Decorations list is required"}), 400
-    
-    username = current_user["username"]
-    new_decorations = data["decorations"]
-    
-    try:
-        # Get user's owned items
-        user_decorations = decorations_collection.find_one({"username": username})
-        if not user_decorations:
-            return jsonify({"status": "error", "message": "No decorations found for user"}), 404
-        
-        # Verify all decorations are owned
-        owned_items = user_decorations["owned_items"]
-        if not all(decoration in owned_items for decoration in new_decorations):
-            return jsonify({"status": "error", "message": "Some decorations are not owned"}), 400
-        
-        # Update active decorations
-        decorations_collection.update_one(
-            {"username": username},
-            {"$set": {"active_decorations": new_decorations}}
-        )
-        
-        return jsonify({
-            "status": "success",
-            "message": "Decorations updated successfully"
-        }), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"Failed to update decorations: {str(e)}"}), 500
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))  # Default to port 80 if PORT isn't set
